@@ -6,12 +6,30 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from enum import Enum
+import sys
+
+import pygame
+from os import path
+
+
+# The Warehouse is divided into a grid. Use these 'tiles' to represent the objects on the grid.
+class GridTile(Enum):
+    _FLOOR=0
+    KNUCKLES=1
+    SONIC=2
+
+    # Return the first letter of tile name, for printing to the console.
+    def __str__(self):
+        return self.name[:1]
+    
 
 class TagEnv(gym.Env):
-    def __init__(self, grid_size=7):
+    def __init__(self, grid_size=7, fps=1.8):
         super().__init__()
         # Environment dimensions (e.g., a 5x5 grid)
+        #replace grid_rows and grid_cols with self.grid_size
         self.grid_size = grid_size
+        self.fps = fps
         # Action space: 0=Up, 1=Down, 2=Left, 3=Right
         self.action_space = spaces.Tuple((
             spaces.Discrete(8),  # Tagger's action
@@ -25,7 +43,46 @@ class TagEnv(gym.Env):
         ))
 
         self.reset()
-    
+
+        self.last_action=''
+        self._init_pygame()
+
+    def _init_pygame(self):
+        pygame.init() # initialize pygame
+        pygame.display.init() # Initialize the display module
+
+        # Game clock
+        self.clock = pygame.time.Clock()
+
+        # Default font
+        self.action_font = pygame.font.SysFont("Calibre",30)
+        self.action_info_height = self.action_font.get_height()
+
+        # For rendering
+        self.cell_height = 64
+        self.cell_width = 64
+        self.cell_size = (self.cell_width, self.cell_height)        
+
+        # Define game window size (width, height)
+        self.window_size = (self.cell_width * self.grid_size, self.cell_height * self.grid_size + self.action_info_height)
+
+        # Initialize game window
+        self.window_surface = pygame.display.set_mode(self.window_size) 
+
+        # Load & resize sprites
+        file_name = path.join(path.dirname(__file__), "sprites/Sonic.png")
+        img = pygame.image.load(file_name)
+        self.sonic_img = pygame.transform.scale(img, self.cell_size)
+
+        file_name = path.join(path.dirname(__file__), "sprites/Knuckles.png")
+        img = pygame.image.load(file_name)
+        self.knuckles_img = pygame.transform.scale(img, self.cell_size)
+
+        file_name = path.join(path.dirname(__file__), "sprites/floor.png")
+        img = pygame.image.load(file_name)
+        self.floor_img = pygame.transform.scale(img, self.cell_size)
+
+
     def reset(self, seed=None, options=None):
         # Initialize positions
         self.tagger_pos = np.array([0, 0])  # Tagger starts at top-left
@@ -59,7 +116,7 @@ class TagEnv(gym.Env):
         done = caught  # Episode ends if tagger catches runner
         truncated = False
 
-        return (tagger_obs, runner_obs), 0, done, _, {'tagger_reward':tagger_reward, 'runner_reward':runner_reward}
+        return (tagger_obs, runner_obs), 0, done, truncated, {'tagger_reward':tagger_reward, 'runner_reward':runner_reward}
 
     def _move(self, position, action):
         # Move within bounds
@@ -87,7 +144,7 @@ class TagEnv(gym.Env):
             return -1
         return 0
 
-    def render(self):
+    def render2(self):
         # Render the grid (optional, useful for debugging)
         grid = np.zeros((self.grid_size, self.grid_size), dtype=str)
         grid[:] = "."
@@ -95,6 +152,65 @@ class TagEnv(gym.Env):
         grid[self.tagger_pos[1], self.tagger_pos[0]] = "T"
         print("\n".join([" ".join(row) for row in grid]))
         print("------------------------------------")
+
+    def render(self):
+        # Print current state on console
+        for r in range(self.grid_size):
+            for c in range(self.grid_size):
+
+                if([r,c] == list(self.tagger_pos)):
+                    print(GridTile.KNUCKLES, end=' ')
+                elif([r,c] == list(self.runner_pos)):
+                    print(GridTile.SONIC, end=' ')
+                else:
+                    print(GridTile._FLOOR, end=' ')
+
+            print() # new line
+        print() # new line
+
+        self._process_events()
+
+        # clear to white background, otherwise text with varying length will leave behind prior rendered portions
+        self.window_surface.fill((255,255,255))
+
+        # Print current state on console
+        for r in range(self.grid_size):
+            for c in range(self.grid_size):
+                
+                # Draw floor
+                pos = (c * self.cell_width, r * self.cell_height)
+                self.window_surface.blit(self.floor_img, pos)
+
+                if([r,c] == list(self.runner_pos)):
+                    # Draw robot
+                    self.window_surface.blit(self.sonic_img, pos)
+                if([r,c] == list(self.tagger_pos)):
+                    # Draw robot
+                    self.window_surface.blit(self.knuckles_img, pos)
+                
+        text_img = self.action_font.render(f'Action: {self.last_action}', True, (0,0,0), (255,255,255))
+        text_pos = (0, self.window_size[1] - self.action_info_height)
+        self.window_surface.blit(text_img, text_pos)       
+
+        pygame.display.update()
+                
+        # Limit frames per second
+        self.clock.tick(self.fps)  
+
+
+    def _process_events(self):
+        # Process user events, key presses
+        for event in pygame.event.get():
+            # User clicked on X at the top right corner of window
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+            if(event.type == pygame.KEYDOWN):
+                # User hit escape
+                if(event.key == pygame.K_ESCAPE):
+                    pygame.quit()
+                    sys.exit()
 
 class Move(Enum):
     UP=0
