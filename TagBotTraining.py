@@ -10,10 +10,9 @@ import pickle
 # from stable_baselines3 import A2C
 import os
 import register_tag_env
-from enum import Enum
 from tag_env import Move
 
-def runQLearning(episodes, is_training=True, render=False, random_runner=False, continue_training=False, runner_training=False):
+def runQLearning(episodes, is_training=True, render=False, random_runner=False, continue_training=False, runner_training=False, tagger_training=False):
 
     env = gym.make('Tag-v0')
     grid_size = env.unwrapped.grid_size
@@ -21,7 +20,10 @@ def runQLearning(episodes, is_training=True, render=False, random_runner=False, 
     if is_training and not continue_training:
         # If training, initialize the Q Table, a 5D vector: [robot_row_pos, robot_row_col, target_row_pos, target_col_pos, actions]
         
-        if not random_runner:
+        if tagger_training:
+            with open('tagger_q_table.pkl', 'rb') as f:
+                q_runner = pickle.load(f)
+        elif not random_runner:
             q_runner = np.zeros((grid_size, grid_size,grid_size, grid_size, env.action_space[1].n))
         if runner_training:
             with open('tagger_q_table.pkl', 'rb') as f:
@@ -39,7 +41,7 @@ def runQLearning(episodes, is_training=True, render=False, random_runner=False, 
 
     # Hyperparameters
     learning_rate = 0.7   # alpha or learning rate
-    discount_factor = 0.7 # gamma or discount rate. Near 0: more weight/reward placed on immediate state. Near 1: more on future state.
+    discount_factor = 0.8 # gamma or discount rate. Near 0: more weight/reward placed on immediate state. Near 1: more on future state.
     epsilon = 1             # 1 = 100% random actions
 
     if not is_training:
@@ -68,14 +70,11 @@ def runQLearning(episodes, is_training=True, render=False, random_runner=False, 
             valid_runner_actions = get_valid_actions(runner_state[0:2], grid_size)
 
             # Select action based on epsilon-greedy
-            if not runner_training:
-                if is_training and random.random() < epsilon:
-                    action_tagger = random.choice(valid_tagger_actions)
-                else:
-                    q_tagger_idx = tuple(tagger_state)
-                    action_tagger = np.argmax(q_tagger[q_tagger_idx])
-            else:
+            if is_training and random.random() < epsilon:
                 action_tagger = random.choice(valid_tagger_actions)
+            else:
+                q_tagger_idx = tuple(tagger_state)
+                action_tagger = np.argmax(q_tagger[q_tagger_idx])
 
             if not random_runner:
                 # Runner selects an action
@@ -104,7 +103,7 @@ def runQLearning(episodes, is_training=True, render=False, random_runner=False, 
                     q_tagger[q_tagger_state_action_idx] += learning_rate * (
                         tagger_reward + discount_factor * np.max(q_tagger[q_tagger_new_state_idx]) - q_tagger[q_tagger_state_action_idx]
                     )
-            if not random_runner:
+            if not random_runner and not tagger_training:
                 # Update Q-Table for runner
                 q_runner_state_action_idx = tuple(runner_state) + (action_runner,)
                 q_runner_new_state_idx = tuple(runner_new_state)
@@ -127,9 +126,12 @@ def runQLearning(episodes, is_training=True, render=False, random_runner=False, 
             epsilon = max(1 - (i / (0.5 * episodes)), 0.01)  # Faster initial decay
         if render:
             print(f"Finished {i} episodes")
+        if i % 100 == 0:
+            print(f'Finished {i} episodes', end='\r')
 
     # Graph steps
     if is_training:
+        print(f"Finished {episodes} episodes")
         sum_steps = np.zeros(episodes)
 
         for t in range(episodes):
@@ -144,26 +146,27 @@ def runQLearning(episodes, is_training=True, render=False, random_runner=False, 
         plt.savefig('tag_env_training.png')
 
         # Save Q-Tables
-        if not random_runner:
+        if not random_runner and not tagger_training:
             with open("runner_q_table.pkl", "wb") as f:
                 pickle.dump(q_runner, f)
         if not runner_training:
             with open("tagger_q_table.pkl", "wb") as f:
                 pickle.dump(q_tagger, f)
 
+
 def get_valid_actions(agent_pos, grid_size):
     valid_actions = []
-    row, col = agent_pos
+    x, y = agent_pos
 
     moves = {
-        Move.UP: (row - 1, col),
-        Move.DOWN: (row + 1, col),
-        Move.LEFT: (row, col - 1),
-        Move.RIGHT: (row, col + 1),
-        Move.UP_LEFT: (row - 1, col - 1),
-        Move.UP_RIGHT: (row - 1, col + 1),
-        Move.DOWN_LEFT: (row + 1, col - 1),
-        Move.DOWN_RIGHT: (row + 1, col + 1)
+        Move.UP: (x, y - 1),
+        Move.DOWN: (x, y + 1),
+        Move.LEFT: (x - 1, y),
+        Move.RIGHT: (x + 1, y),
+        Move.UP_LEFT: (x - 1, y - 1),
+        Move.UP_RIGHT: (x + 1, y - 1),
+        Move.DOWN_LEFT: (x - 1, y + 1),
+        Move.DOWN_RIGHT: (x + 1, y + 1)
     }
 
     for action, (new_row, new_col) in moves.items():
@@ -173,10 +176,30 @@ def get_valid_actions(agent_pos, grid_size):
     return valid_actions
 
 if __name__ == "__main__":
-    # Training and Testing the Qlearning of the Tag Bot
-    runQLearning(episodes=10000, is_training=True, render=False, random_runner=True)
-    runQLearning(2, is_training=False, render=True, random_runner=True)
-    # Training a Q learner bot using the trained TagBot
+    ''' Training and Testing the Qlearning of the Tag Bot '''
+    # runQLearning(episodes=50000, is_training=True, render=False, random_runner=True)
+    # runQLearning(5, is_training=False, render=True, random_runner=True)
+
+    ''' Training a Q learner bot using the trained TagBot'''
+    # runQLearning(episodes=10000, is_training=True, render = False, runner_training=True)
+    # runQLearning(2, is_training=False, render=True)
+
+    ''' Training and Testing the Qlearning of the Tag Bot '''
+    # runQLearning(episodes=50000, is_training=True, render=False, tagger_training=True)
+    # runQLearning(2, render=True,is_training=False,continue_training=False)
+
+    ''' using both learning agents '''
+    # runQLearning(episodes=100000, is_training=True, render = False)
+    # runQLearning(1, is_training=False, render=True)
+
+    ''' seeing how the fully advanced tagger does against a random runner. '''
+    # runQLearning(5, is_training=False, random_runner=True, render=True)
+
+    ''' final test of initial, training tagger, then runner, then both'''
+    runQLearning(episodes=50000, is_training=True, render=False, random_runner=True)
+    runQLearning(5, is_training=False, render=True, random_runner=True)
     runQLearning(episodes=10000, is_training=True, render = False, runner_training=True)
     runQLearning(2, is_training=False, render=True)
+    runQLearning(episodes=500000, is_training=True, render = False)
+    runQLearning(1, is_training=False, render=True)
 
